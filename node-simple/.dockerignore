@@ -1,0 +1,2 @@
+# Ignore node_modules, but include package-lock.json
+node_modules/ 
