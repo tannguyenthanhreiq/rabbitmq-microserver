@@ -112,6 +112,11 @@ async function transcodeVideo(inputPath, outputPath, resolutions) {
       `-vf "scale=w=640:h=360:force_original_aspect_ratio=decrease:eval=frame,scale=w=ceil(iw/2)*2:h=ceil(ih/2)*2" -c:a aac -ar 48000 -c:v libx264 -profile:v main -crf 23 -maxrate 800k -bufsize 1200k -b:a 96k -hls_time 4 -hls_playlist_type vod -hls_flags single_file+independent_segments -hls_segment_type fmp4  -hls_segment_filename ${outputPath}/360p.m4s ${outputPath}/360p.m3u8`
     );
   }
+  if (resolutions.includes(360)) {
+    commands.push(
+      `-vf "scale=w=640:h=360:force_original_aspect_ratio=decrease:eval=frame,scale=w=ceil(iw/2)*2:h=ceil(ih/2)*2" -c:a aac -ar 48000 -c:v libx264 -profile:v main -crf 23 -maxrate 800k -bufsize 1200k -b:a 96k -hls_time 4 -hls_playlist_type vod -hls_flags single_file+independent_segments -hls_segment_type fmp4  -hls_segment_filename ${outputPath}/360p.m4s ${outputPath}/360p.m3u8`
+    );
+  }
   if (resolutions.includes(720)) {
     commands.push(
       `-vf "scale=w=1280:h=720:force_original_aspect_ratio=decrease:eval=frame,scale=w=ceil(iw/2)*2:h=ceil(ih/2)*2" -c:a aac -ar 48000 -c:v libx264 -profile:v main -crf 21 -maxrate 2800k -bufsize 4200k -b:a 128k -hls_time 4 -hls_playlist_type vod -hls_flags single_file+independent_segments -hls_segment_type fmp4 -hls_segment_filename ${outputPath}/720p.m4s ${outputPath}/720p.m3u8`
