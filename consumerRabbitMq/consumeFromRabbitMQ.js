@@ -1,3 +1,4 @@
+require("dotenv").config();
 const amqp = require("amqplib");
 const { Storage, TransferManager } = require("@google-cloud/storage");
 const { exec } = require("child_process");
@@ -45,21 +46,20 @@ async function processMessage(message) {
     await transcodeVideo(inputPath, outputPath, resolutions);
     createMasterPlaylist(outputPath, resolutions);
     await transferFileToGcs(bucketName, outputPath);
-    // await sendMetadataToServer({
-    //   metadata: {
-    //     lectureId,
-    //     transcodedVideoUrl: `https://storage.googleapis.com/${bucketName}/transcoded-videos/${instructorId}/${lectureId}/manifest.m3u8`,
-    //     status: "finished",
-    //   },
-    // });
+    await sendMetadataToServer({
+      metadata: {
+        lectureId,
+        transcodedVideoUrl: `https://storage.googleapis.com/${bucketName}/transcoded-videos/${instructorId}/${lectureId}/manifest.m3u8`,
+        status: "finished",
+      },
+    });
     deleteFolderDirectory(outputPath);
   }
 }
 
 async function consumeFromRabbitMQ() {
-  const connection = await amqp.connect(
-    "amqp://guest:guest@0.tcp.ap.ngrok.io:11505"
-  );
+  const connection = await amqp.connect(process.env.RABBITMQ_URL);
+  console.log(process.env.RABBITMQ_URL);
   const channel = await connection.createChannel();
   const queue = "transcoding_queue";
 
@@ -77,7 +77,7 @@ async function consumeFromRabbitMQ() {
 async function sendMetadataToServer(metadata) {
   try {
     const response = await axios.post(
-      `https://dev-api-academy.megalithinc.com/api/v1/video-transcoder`,
+      `${process.env.SERVER_URL}/api/v1/video-transcoder`,
       metadata
     );
     console.log(response?.data);
