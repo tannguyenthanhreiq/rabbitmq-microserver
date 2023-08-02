@@ -7,7 +7,7 @@ module.exports = {
       exec_mode: "cluster",
       env: {
         NODE_ENV: "development",
-        RABBITMQ_URL: "amqp://guest:guest@6.tcp.ngrok.io:11539",
+        RABBITMQ_URL: "amqp://guest:guest@2.tcp.ngrok.io:12507",
         SERVER_URL: "https://dev-api-academy.megalithinc.com",
       },
     },
