@@ -64,11 +64,11 @@ async function consumeFromRabbitMQ() {
   const queue = "transcoding_queue";
 
   await channel.assertQueue(queue, { durable: true });
-  channel.prefetch(1);
+  await channel.prefetch(1);
 
   console.log("Waiting for messages in RabbitMQ...");
 
-  channel.consume(queue, async (message) => {
+  await channel.consume(queue, async (message) => {
     await processMessage(message);
     channel.ack(message);
   });
@@ -77,7 +77,7 @@ async function consumeFromRabbitMQ() {
 async function sendMetadataToServer(metadata) {
   try {
     const response = await axios.post(
-      `${process.env.SERVER_URL}/api/v1/video-transcoder`,
+      `${process.env.SERVER_URL}/api/v1/processing-transcode-video`,
       metadata
     );
     console.log(response?.data);
@@ -207,7 +207,7 @@ async function createOutputDirectories(outputPath) {
   }
 }
 
-async function deleteFolderDirectory(path) {
+function deleteFolderDirectory(path) {
   try {
     console.log("Starting delete output directory");
     fs.rmSync(path, {
