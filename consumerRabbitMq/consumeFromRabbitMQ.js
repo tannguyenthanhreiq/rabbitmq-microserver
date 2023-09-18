@@ -116,7 +116,7 @@ async function getVideoInfo(inputPath) {
 
 // Step 3: Transcode video with compatible bitrates
 async function transcodeVideo(inputPath, outputPath, resolution) {
-  console.log("Starting transcode video for ", inputPath);
+  console.log("Starting for ", inputPath);
   const commands = [];
 
   // if (resolutions.includes(360)) {
