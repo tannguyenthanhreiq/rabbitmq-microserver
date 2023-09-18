@@ -5,19 +5,18 @@ const { exec } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const axios = require("axios");
-
-const { PubSub } = require("@google-cloud/pubsub");
+require("dotenv").config();
 
 async function processMessage(message) {
   try {
-    const { file, bucket } = JSON.parse(message.content.toString());
+    const { name, bucket } = JSON.parse(message.content.toString());
 
     console.log(
-      `Received message from RabbitMQ: fileURL=${file}, bucketName=${bucket}`
+      `Received message from RabbitMQ: fileURL=${name}, bucketName=${bucket}`
     );
 
-    if (file && bucket) {
-      const fileName = file;
+    if (name && bucket) {
+      const fileName = name;
       const bucketName = bucket;
 
       const inputPath = encodeURI(
@@ -44,7 +43,11 @@ async function processMessage(message) {
       if (videoHeight >= 1080) resolutions.push(1080);
 
       await createOutputDirectories(outputPath);
-      await transcodeVideo(inputPath, outputPath, resolutions);
+
+      const transcodePromises = resolutions.map((resolution) =>
+        transcodeVideo(inputPath, outputPath, resolution)
+      );
+      await Promise.all(transcodePromises);
       createMasterPlaylist(outputPath, resolutions);
       await transferFileToGcs(bucketName, outputPath);
       await sendMetadataToServer({
@@ -75,41 +78,23 @@ async function consumeFromRabbitMQ() {
   await channel.consume(queue, async (message) => {
     try {
       await processMessage(message);
+      channel.ack(message);
     } catch (error) {
       console.log({ error });
-    } finally {
-      channel.ack(message);
     }
   });
 }
 
 async function sendMetadataToServer(metadata) {
   try {
-    console.log({ serverUrl: process.env.SERVER_URL, metadata });
     const response = await axios.post(
-      `${process.env.SERVER_URL}/api/v1/processing-transcode-video`,
+      `${process.env.SERVER_URL}/webhook/processing-transcode-video`,
       metadata
     );
     console.log(response?.data);
   } catch (error) {
     console.error(`Error sending metadata to server: ${error}`);
     throw new Error(`Error sending metadata to server: ${error}`);
-  }
-}
-
-async function publishTranscodingMetadata(metadata) {
-  const pubSubClient = new PubSub({
-    projectId: "re-academy",
-    keyFilename: path.join(__dirname, "../../re-academy.json"),
-  });
-  const topicName = "transcoding-complete-topic";
-  const data = Buffer.from(JSON.stringify(metadata));
-
-  try {
-    await pubSubClient.topic(topicName).publishMessage({ data });
-    console.log(`Published transcoding metadata: ${data}`);
-  } catch (error) {
-    console.error(`Error publishing transcoding metadata: ${error}`);
   }
 }
 
@@ -130,7 +115,7 @@ async function getVideoInfo(inputPath) {
 }
 
 // Step 3: Transcode video with compatible bitrates
-async function transcodeVideo(inputPath, outputPath, resolutions) {
+async function transcodeVideo(inputPath, outputPath, resolution) {
   console.log("Starting transcode video for ", inputPath);
   const commands = [];
 
@@ -139,17 +124,15 @@ async function transcodeVideo(inputPath, outputPath, resolutions) {
   //     `-vf "scale=w=640:h=360:force_original_aspect_ratio=decrease:eval=frame,scale=w=ceil(iw/2)*2:h=ceil(ih/2)*2" -c:a aac -ar 48000 -c:v libx264 -profile:v main -crf 23 -maxrate 800k -bufsize 1200k -b:a 96k -hls_time 4 -hls_playlist_type vod -hls_flags single_file+independent_segments -hls_segment_type fmp4  -hls_segment_filename ${outputPath}/360p.m4s ${outputPath}/360p.m3u8`
   //   );
   // }
-  if (resolutions.includes(480)) {
+  if (resolution === 480) {
     commands.push(
       `-vf "scale=w=842:h=480:force_original_aspect_ratio=decrease:eval=frame,scale=w=ceil(iw/2)*2:h=ceil(ih/2)*2" -c:a aac -ar 48000 -c:v libx264 -profile:v main -crf 22 -maxrate 1400k -bufsize 2100k -b:a 128k -hls_time 4 -hls_playlist_type vod -hls_flags single_file+independent_segments -hls_segment_type fmp4 -hls_segment_filename ${outputPath}/480p.m4s ${outputPath}/480p.m3u8`
     );
-  }
-  if (resolutions.includes(720)) {
+  } else if (resolution === 720) {
     commands.push(
       `-vf "scale=w=1280:h=720:force_original_aspect_ratio=decrease:eval=frame,scale=w=ceil(iw/2)*2:h=ceil(ih/2)*2" -c:a aac -ar 48000 -c:v libx264 -profile:v main -crf 21 -maxrate 2800k -bufsize 4200k -b:a 128k -hls_time 4 -hls_playlist_type vod -hls_flags single_file+independent_segments -hls_segment_type fmp4 -hls_segment_filename ${outputPath}/720p.m4s ${outputPath}/720p.m3u8`
     );
-  }
-  if (resolutions.includes(1080)) {
+  } else if (resolution === 1080) {
     commands.push(
       `-vf "scale=w=1920:h=1080:force_original_aspect_ratio=decrease:eval=frame,scale=w=ceil(iw/2)*2:h=ceil(ih/2)*2" -c:a aac -ar 48000 -c:v libx264 -profile:v main -crf 20 -maxrate 5350k -bufsize 7500k -b:a 192k -hls_time 4 -hls_playlist_type vod -hls_flags single_file+independent_segments -hls_segment_type fmp4 -hls_segment_filename ${outputPath}/1080p.m4s ${outputPath}/1080p.m3u8`
     );
@@ -160,13 +143,48 @@ async function transcodeVideo(inputPath, outputPath, resolutions) {
   )}`;
 
   return new Promise((resolve, reject) => {
-    exec(command, async (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Error: ${error.message}`);
-        reject(new Error(`Error transcoding video: ${error.message}`));
-      } else {
+    const transcodingProcess = exec(command);
+
+    let duration;
+    let currentTime;
+
+    transcodingProcess.stderr.on("data", (data) => {
+      const str = data.toString();
+      let match = str.match(/Duration: ([\d:.]+)/);
+      if (match) {
+        const timeParts = match[1].split(":");
+        duration = +timeParts[0] * 60 * 60 + +timeParts[1] * 60 + +timeParts[2];
+      }
+      match = str.match(/time=([\d:.]+)/);
+      if (match) {
+        const timeParts = match[1].split(":");
+        currentTime =
+          +timeParts[0] * 60 * 60 + +timeParts[1] * 60 + +timeParts[2];
+      }
+
+      if (duration && currentTime) {
+        const percentage = ((currentTime / duration) * 100).toFixed(2);
+        console.log(
+          `Transcoding progress for ${resolution} - ${inputPath}: ${percentage}%`
+        );
+      }
+    });
+
+    transcodingProcess.stdout.on("data", (data) => {
+      console.log(`FFMPEG finished for ${resolution}:\n${data}`);
+    });
+
+    transcodingProcess.on("exit", (code) => {
+      if (code === 0) {
         console.log("Conversion completed.");
         resolve("Conversion completed.");
+      } else {
+        console.error(`Error: FFMPEG process exited with code ${code}`);
+        reject(
+          new Error(
+            `Error transcoding video: FFMPEG process exited with code ${code}`
+          )
+        );
       }
     });
   });
