@@ -85,6 +85,7 @@ async function consumeFromRabbitMQ() {
 
 async function sendMetadataToServer(metadata) {
   try {
+    console.log({ serverUrl: process.env.SERVER_URL, metadata });
     const response = await axios.post(
       `${process.env.SERVER_URL}/api/v1/processing-transcode-video`,
       metadata
