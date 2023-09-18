@@ -8,8 +8,7 @@ module.exports = {
       env: {
         NODE_ENV: "development",
         RABBITMQ_URL: "amqp://tannguyen:514723@34.173.207.107:5672",
-        // SERVER_URL: "https://dev-api-academy.megalithinc.com",
-        SERVER_URL: "http://localhost:3333",
+        SERVER_URL: "https://dev-api-academy.megalithinc.com",
       },
     },
   ],
