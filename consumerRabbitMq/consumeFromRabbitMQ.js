@@ -9,51 +9,55 @@ const axios = require("axios");
 const { PubSub } = require("@google-cloud/pubsub");
 
 async function processMessage(message) {
-  const { file, bucket } = JSON.parse(message.content.toString());
+  try {
+    const { file, bucket } = JSON.parse(message.content.toString());
 
-  console.log(
-    `Received message from RabbitMQ: fileURL=${file}, bucketName=${bucket}`
-  );
-
-  if (file && bucket) {
-    const fileName = file;
-    const bucketName = bucket;
-
-    const inputPath = encodeURI(
-      `https://storage.googleapis.com/${bucketName}/${fileName}`
+    console.log(
+      `Received message from RabbitMQ: fileURL=${file}, bucketName=${bucket}`
     );
-    const arrFile = fileName.split("/");
-    const instructorId = arrFile[1];
-    const lectureId = arrFile[2];
-    const videoName = arrFile[3];
-    console.log(instructorId, lectureId, videoName);
-    if (!videoName.includes(".mp4") || !(instructorId && lectureId)) {
-      throw new Error("Invalid input");
+
+    if (file && bucket) {
+      const fileName = file;
+      const bucketName = bucket;
+
+      const inputPath = encodeURI(
+        `https://storage.googleapis.com/${bucketName}/${fileName}`
+      );
+      const arrFile = fileName.split("/");
+      const instructorId = arrFile[1];
+      const lectureId = arrFile[2];
+      const videoName = arrFile[3];
+      console.log(instructorId, lectureId, videoName);
+      if (!videoName.includes(".mp4") || !(instructorId && lectureId)) {
+        throw new Error("Invalid input");
+      }
+      const outputPath = `transcoded-videos/${instructorId}/${lectureId}`;
+
+      const videoInfo = await getVideoInfo(inputPath);
+      const videoHeight = videoInfo.streams[0].height;
+
+      // Step 2: Determine resolutions to transcode
+      const resolutions = [];
+      // if (videoHeight >= 360) resolutions.push(360);
+      if (videoHeight >= 480) resolutions.push(480);
+      if (videoHeight >= 720) resolutions.push(720);
+      if (videoHeight >= 1080) resolutions.push(1080);
+
+      await createOutputDirectories(outputPath);
+      await transcodeVideo(inputPath, outputPath, resolutions);
+      createMasterPlaylist(outputPath, resolutions);
+      await transferFileToGcs(bucketName, outputPath);
+      await sendMetadataToServer({
+        metadata: {
+          lectureId,
+          transcodedVideoUrl: `https://storage.googleapis.com/${bucketName}/transcoded-videos/${instructorId}/${lectureId}/manifest.m3u8`,
+          status: "finished",
+        },
+      });
+      deleteFolderDirectory(outputPath);
     }
-    const outputPath = `transcoded-videos/${instructorId}/${lectureId}`;
-
-    const videoInfo = await getVideoInfo(inputPath);
-    const videoHeight = videoInfo.streams[0].height;
-
-    // Step 2: Determine resolutions to transcode
-    const resolutions = [];
-    // if (videoHeight >= 360) resolutions.push(360);
-    if (videoHeight >= 480) resolutions.push(480);
-    if (videoHeight >= 720) resolutions.push(720);
-    if (videoHeight >= 1080) resolutions.push(1080);
-
-    await createOutputDirectories(outputPath);
-    await transcodeVideo(inputPath, outputPath, resolutions);
-    createMasterPlaylist(outputPath, resolutions);
-    await transferFileToGcs(bucketName, outputPath);
-    await sendMetadataToServer({
-      metadata: {
-        lectureId,
-        transcodedVideoUrl: `https://storage.googleapis.com/${bucketName}/transcoded-videos/${instructorId}/${lectureId}/manifest.m3u8`,
-        status: "finished",
-      },
-    });
-    deleteFolderDirectory(outputPath);
+  } catch (error) {
+    console.log(`Error processing message: ${error}`);
   }
 }
 
@@ -69,8 +73,13 @@ async function consumeFromRabbitMQ() {
   console.log("Waiting for messages in RabbitMQ...");
 
   await channel.consume(queue, async (message) => {
-    await processMessage(message);
-    channel.ack(message);
+    try {
+      await processMessage(message);
+    } catch (error) {
+      console.log({ error });
+    } finally {
+      channel.ack(message);
+    }
   });
 }
 
